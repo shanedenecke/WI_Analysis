@@ -1,0 +1,353 @@
+### Import All of your Libraries ###
+{
+library(rChoiceDialogs)
+library(svDialogs)
+library(plyr)
+library(ggplot2)
+require(data.table)
+library(colorspace)
+library(cowplot)
+library(RColorBrewer)
+}
+
+
+### Remember to have your Data organized in the following way 
+### 1) We need () around each piece of info in your name
+### 2) We also need The name in the following order "Genotype","Dose","Time","Rep","Insecticide","Date","Position"
+### 3) The Processing script is optimized to take videos converted through Video jpeg converter (DVD soft), which is free
+### Example: (Line).(48ppm).(15min).(rep1).(Imidacloprid).(23.10.14) (10-23-2014 8-06-41 AM)LowLeft.tif
+	  
+
+### Let's get some basic info
+
+{
+dlgMessage(message="OK Lets Get Some Basic Info Before We \n Start Wiggling",type="ok")
+mainDir=jchoose.dir(caption="Please Choose The Directory Where Your Data is Found",default="C:/Users/Shane/Dropbox/Results")
+File_Name=jchoose.files(default=mainDir,caption="Please Choose Your Data File",multi=F)
+cntrl_Line=dlgInput(message="Please Enter Which Genotype is Your Control")$res
+Graph_Title=dlgInput(message="Please Enter A Name for Your Experiment")$res
+Compare=dlgList(title="How do you Want to Display Your Data",choices=c("Doses","Genotypes","GLM"),multiple=T)$res
+Length=dlgList(title="What Time Interval Would You Like To Analyze",choices=c("Short","Medium","All"),multiple=T)$res
+Type=dlgList(title="Would You Like To See Corrected or Raw Values",choices=c("Relative","Raw"),multiple=T)$res
+#Group=dlgList(title="Would You Like To Display Your Results \n Isolated Against Their Mathced Controls",c("Group","Individual"),multiple=T)$res
+}
+
+### Create Graphing Directory and Import Data 
+{
+setwd(mainDir)
+GraphDir=paste(getwd(),"/",Graph_Title,"_Graph",sep="")
+dir.create(GraphDir)
+Data=unique(read.csv(File_Name,header=T))
+
+}
+
+
+###Let's get a workable Data frame from your raw Data File
+{         
+SPLIT_Frame=matrix(unlist(strsplit(as.character(Data$Image.Name),"\\).")),ncol=8,byrow=T)[,c(1:6,8)]
+SPLIT_Frame=gsub("\\(","",SPLIT_Frame)
+SPLIT_Frame=gsub(".tif","",SPLIT_Frame)
+SPLIT_Frame=gsub("opRight","TopRight",SPLIT_Frame)
+SPLIT_Frame=gsub("opLeft","TopLeft",SPLIT_Frame)
+SPLIT_Frame=gsub("owRight","LowRight",SPLIT_Frame)
+SPLIT_Frame=gsub("owLeft","LowLeft",SPLIT_Frame)
+WI_Frame=cbind(SPLIT_Frame,Data$Wiggle.Index)
+colnames(WI_Frame)=c("Genotype","Dose","Time","Plate","Insecticide","Date","Position","Wiggle_Index")
+WI_Frame[,'Time']=as.numeric(gsub('min',"",WI_Frame[,'Time']))		  
+WI_Frame=data.frame(WI_Frame) 
+}
+
+###OK You've got your data frame ready. Let's get your modified WI values ###
+{
+
+Corrected_Data=data.frame()
+Dates=as.character(unique(WI_Frame$Date))
+Doses=as.character(unique(WI_Frame$Dose))
+Genotypes=as.character(unique(WI_Frame$Genotype))
+Plates=as.character(unique(WI_Frame$Plate))
+Positions=as.character(unique(WI_Frame$Position))
+Insecticides=as.character(unique(WI_Frame$Insecticide))
+for (a in Dates){
+  for (b in Doses){
+    for(c in Genotypes){
+      for (d in Plates){
+        for (e in Positions){
+          for (f in Insecticides){
+            sub=subset(WI_Frame,Date==a & Dose==b & Genotype==c & Plate==d & Position==e & Insecticide==f)
+            if(length(sub$Wiggle_Index)>0){
+              subWI=as.numeric(as.character(sub$Wiggle_Index))
+              EV=c()
+              for (i in 1:length(subWI)){
+                x=subWI[i]/subWI[1]
+                EV[i]=x
+              }
+              sub$Modified=EV
+              Corrected_Data=rbind(Corrected_Data,sub)
+            }else{
+              print("Such is Life")
+            }
+          }
+        }
+      }
+    }
+  }
+}
+}
+
+### So now you've generated a data frame called Corrected_Data with all the information for RMR value plots
+###But lets generate a second Data Frame that you can use for the GLM analysis
+
+### Make a matrix in which each well is a row and each time point becomes an additional column
+{
+Sliced_Data=as.matrix(Corrected_Data)
+Sliced_Data[,"Time"]=as.numeric(Sliced_Data[,"Time"]) 
+rownames(Sliced_Data)=paste(Sliced_Data[,1],Sliced_Data[,2],Sliced_Data[,4],Sliced_Data[,5],Sliced_Data[,6],Sliced_Data[,7],sep="_")
+Time_pts=unique(as.numeric(Sliced_Data[,"Time"]))
+Time_pts=Time_pts[order(Time_pts)]
+Columns=c("Genotype","Dose","Plate","Insecticide","Date","Position",Time_pts)
+Frame_By_Time=matrix(ncol=length(Columns))
+colnames(Frame_By_Time)=Columns
+for (i in unique(rownames(Sliced_Data))) {
+	Run=Sliced_Data[which(rownames(Sliced_Data)==i),]
+	Run=Run[order(as.numeric(Run[,"Time"])),]
+	submat=matrix(ncol=length(Columns),nrow=1)
+	rownames(submat)=i
+	colnames(submat)=Columns
+	submat[1,]=as.vector(c(Run[1,'Genotype'],Run[1,'Dose'],Run[1,'Plate'],Run[1,'Insecticide'],Run[1,'Date'],Run[1,'Position'],Run[,'Wiggle_Index']))
+	Frame_By_Time=rbind(Frame_By_Time,submat)
+	}
+Frame_By_Time=Frame_By_Time[-1,]
+}
+
+### Create All directories for the plot types you have chosen
+{
+setwd(GraphDir)
+ex=expand.grid(Compare,Length,Type)
+	Plot_List=c()
+for (i in 1:length(ex$Var1)){v=c()
+	for (b in ex[i,]){v=paste(v,b,sep="_")}
+	Plot_List=c(Plot_List,v)}	
+for (p in Plot_List){
+	if (grepl("Relative",p) & grepl("GLM",p)) {
+	Plot_List=Plot_List[!Plot_List %in% p]
+	}
+	}
+	
+sapply(Plot_List,dir.create)
+}
+
+
+### Summarize all of your data for RMR value plots
+{
+
+Corrected_Data$Wiggle_Index=as.numeric(as.character(Corrected_Data$Wiggle_Index))
+Summary_Data=ddply(Corrected_Data, c("Dose","Genotype","Insecticide","Time"), summarise,
+                  N    = length(Wiggle_Index),
+                  Mean_Rel = mean(Modified),
+                  Sd_Rel   = sd(Modified),
+                  Se_Rel   = Sd_Rel/sqrt(N),
+                  CI_Rel   = qnorm(0.975)*Se_Rel,
+                  Mean_Raw = mean(Wiggle_Index),
+                  Sd_Raw   = sd(Wiggle_Index),
+                  Se_Raw   = Sd_Raw/sqrt(N),
+                  CI_Raw   = qnorm(0.975)*Se_Raw)
+				  #Date     = as.character(unique(Date)))
+Summary_Data$Dose=as.numeric(gsub("ppm","",Summary_Data$Dose))
+Summary_Data=data.table(Summary_Data,key="Dose")
+for (i in 1:length(Summary_Data$Dose)){
+	Summary_Data$Dose[i]=paste(Summary_Data$Dose[i],"ppm",sep="")
+}
+Summary_Data$Dose=factor(Summary_Data$Dose,as.character(Summary_Data$Dose))
+Summary_Data=data.frame(Summary_Data)
+}
+
+
+### Set all of your Plotting variables
+### You can alter this code to determine colour pallets depending on what information you are trying to display
+
+{
+Color=colorRampPalette(c("#00007F", "blue", "#007FFF", "cyan","#7FFF7F", "#FF7F00", "red", "#7F0000"))
+#Color=c("gold3","purple")
+#Color=c(rev(brewer.pal(length(unique(Summary_Data$Dose))-1,"Spectral")))
+
+
+	Doses=unique(as.character(Summary_Data$Dose))
+	Plot_Base_Dose=c(Doses[Doses %in% "0ppm"],Doses[!Doses %in% "0ppm"])
+	Color_Base_Dose=c("black",Color(length(Plot_Base_Dose)-1))
+	#Color_Base_Dose=c("black",Color[1:(length(Plot_Base_Dose)-1)])
+	Shape_Base_Dose=c(0,rep(1,length(Plot_Base_Dose)-1))
+	Line_Base_Dose=c(2,rep(1,length(Plot_Base_Dose)-1))
+	names(Color_Base_Dose)=Plot_Base_Dose
+	names(Shape_Base_Dose)=Plot_Base_Dose
+	names(Line_Base_Dose)=Plot_Base_Dose
+
+	Genotypes=unique(as.character(Summary_Data$Genotype))
+	Plot_Base_Genotype=c(Genotypes[Genotypes %in% cntrl_Line],Genotypes[!Genotypes %in% cntrl_Line])
+	Color_Base_Genotype=c("black",Color(length(Plot_Base_Genotype)-1))
+	#Color_Base_Genotype=c("black",Color[1:(length(Plot_Base_Genotype))-1])
+	Shape_Base_Genotype=c(0,rep(1,length(Plot_Base_Genotype)-1))
+	Line_Base_Genotype=c(2,rep(1,length(Plot_Base_Genotype)-1))
+	names(Color_Base_Genotype)=Plot_Base_Genotype
+	names(Line_Base_Genotype)=Plot_Base_Genotype
+	names(Shape_Base_Genotype)=Plot_Base_Genotype
+}
+				  
+				  
+### This will begin a for Loop that will generate plots for each element in the Plot_List vector 
+### which is the permutation of every option that you chose
+
+
+for (IP in Plot_List){
+	setwd(file.path(GraphDir,IP))
+
+	### This series of control flow statements will get variables needed to plot your specific graph
+	{
+	if (grepl("Short",IP)){
+		Plot_Data=subset(Summary_Data,Time==0 | Time==5 | Time==10 | Time==15 | Time==30)
+		A="Short"
+		}else if(grepl("Medium",IP)){
+			Plot_Data=subset(Summary_Data,Time==0 | Time==5 | Time==10 | Time==15 | Time==30 | Time==45 |Time==60 | Time==120)
+			A="Medium"
+		}else if(grepl("All",IP)){
+			Plot_Data=Summary_Data
+			if (grepl("Imidacloprid",IP)){Plot_Data=subset(Summary_Data,Time!=240)}
+			A="All"
+		}
+	if (grepl("Relative",IP)){
+	
+		Plot_Data=subset(Plot_Data, select=c("Dose","Genotype","Time","Insecticide","Mean_Rel","CI_Rel"))
+		colnames(Plot_Data)=c("Dose","Genotype","Time","Insecticide","Mean","CI")
+		D="Relative"
+		}else if (grepl("Raw",IP)){
+		Plot_Data=subset(Plot_Data, select=c("Dose","Genotype","Time","Insecticide","Mean_Raw","CI_Raw"))
+		colnames(Plot_Data)=c("Dose","Genotype","Time","Insecticide","Mean","CI")
+		D="Raw"
+		
+		}
+	if (grepl("Genotype",IP)){
+		E="Dose"
+		F="Genotype"
+	}else if (grepl("Dose",IP)){
+		E="Genotype"
+		F="Dose"
+	}else if (grepl("GLM",IP)){
+		E="GLM"}
+}
+
+
+	### This will modify your plotting variables in accordance with the graph that you chose
+	{
+	Color_Dose=Color_Base_Dose[as.character(unique(Plot_Data$Dose))]
+	Shape_Dose=Shape_Base_Dose[as.character(unique(Plot_Data$Dose))]
+	Line_Dose=Line_Base_Dose[as.character(unique(Plot_Data$Dose))]
+	
+	Color_Genotype=Color_Base_Genotype[as.character(unique(Plot_Data$Genotype))]
+	Shape_Genotype=Shape_Base_Genotype[as.character(unique(Plot_Data$Genotype))]
+	Line_Genotype=Line_Base_Genotype[as.character(unique(Plot_Data$Genotype))]
+	}
+	
+	###This Part will plot your RMR values for your Dose and Genotype specific graphs
+	
+	if (E=="Dose" | E=="Genotype"){
+		for (Y in Insecticides){
+			sub.Insecticide=subset(Plot_Data,Insecticide==Y)
+				for (X in get(paste(F,"s",sep=""))){
+					sub.3=subset(sub.Insecticide,get(F)==X)
+					### Considers if Individual or Group plot will be used 
+					sub.3$Time=as.numeric(as.character(sub.3$Time))
+					x=ggplot(sub.3,aes_string(x="Time",y="Mean",colour=E)) +
+					geom_errorbar(aes(ymin=Mean-CI, ymax=Mean+CI), width=max(as.numeric(unique(sub.3$Time)))/30,size=.5) +
+					geom_line(size=.9,aes_string(linetype=E)) +
+					geom_point(size=3,fill=1,aes_string(shape=E)) +
+					scale_colour_manual(values=get(paste("Color_",E,sep=""))) +
+					scale_shape_manual(values=get(paste("Shape_",E,sep=""))) +
+					scale_linetype_manual(values=get(paste("Line_",E,sep=""))) +
+					ylim(0,1.6) +
+					xlab("Time (min)") +
+					ylab(paste("RMR Value")) +
+					theme(text=element_text(size=10,face="bold",family="Times"),plot.title=element_text(size=16,face="bold",family="Times"),legend.title=element_text(size=12,face="bold",family="Times"))+
+					background_grid(major = "xy", minor = "none",colour.major="grey75")+
+					if (F=="Dose"){
+					ggtitle(paste(X))
+					}else {
+					ggtitle(paste(Y))
+					}
+					save_plot(filename=paste(Graph_Title,A,D,X,Y,"3.pdf"),plot=x,base_aspect_ratio = 1.3)
+	}}}
+	else if (grepl("GLM",IP)){
+		
+		if (grepl("Short",IP)){
+			Data_Por_Tiempo=Frame_By_Time[,c("Genotype","Dose","Plate","Insecticide","Date","Position",as.character(Time_pts[which(Time_pts<=30 & Time_pts>=0)]))]
+			A="Short"
+			Puntos_de_Tiempo=Time_pts[which(Time_pts<=30 & Time_pts>=0)]
+		}else if(grepl("Medium",IP)){
+			Data_Por_Tiempo=Frame_By_Time[,c("Genotype","Dose","Plate","Insecticide","Date","Position",as.character(Time_pts[which(Time_pts<=120 & Time_pts>=0)]))]
+			A="Medium"
+			Puntos_de_Tiempo=Time_pts[which(Time_pts<=120 & Time_pts>=0)]
+		}else if(grepl("All",IP)){
+			Data_Por_Tiempo=Frame_By_Time
+			A="All"
+			Puntos_de_Tiempo=Time_pts}
+			
+	
+		Out=vector(length=4)
+		for (i in 1:nrow(Data_Por_Tiempo)) {
+			test.raw=summary(lm(Data_Por_Tiempo[i,7:ncol(Data_Por_Tiempo)]~Puntos_de_Tiempo))
+			test.xlog=summary(lm(Data_Por_Tiempo[i,7:ncol(Data_Por_Tiempo)]~log(1+Puntos_de_Tiempo)))
+			test.xylog=summary(lm(log(as.numeric(Data_Por_Tiempo[i,7:ncol(Data_Por_Tiempo)]))~log(1+Puntos_de_Tiempo)))
+			R.sq=c(raw=test.raw$adj.r.squared,xlog=test.xlog$adj.r.squared,xylog=test.xylog$adj.r.squared)
+			#Intercept=c(rawI=test.raw$coefficient[1,1],xlogI=test.xlog$coefficient[1,1],xylogI=test.xylog$coefficient[1,1])
+			Betas=c(raw=test.raw$coefficient[2,1],xlog=test.xlog$coefficient[2,1],xylog=test.xylog$coefficient[2,1])
+			Out=rbind(Out,c(names(R.sq)[R.sq==max(R.sq)],Betas))
+		}
+		Out=Out[-1,]
+		table(Out[,1])
+		Trans=names(table(Out[,1]))[table(Out[,1])==max(table(Out[,1]))]
+
+		#Overwrite Your Trans  Trans="raw",Trans="xlog" or Trans="xylog"
+		Trans="xlog"
+
+		wiggle_beta=as.numeric(Out[,Trans])
+		Final_Frame=cbind(Data_Por_Tiempo[,"Genotype"],Data_Por_Tiempo[,"Dose"],Data_Por_Tiempo[,"Insecticide"],wiggle_beta=(wiggle_beta))
+		head(Final_Frame)
+		Final_Frame2=data.frame(Final_Frame)
+		colnames(Final_Frame2)=c("Genotype","Dose","Insecticide","wiggle_beta")
+		
+		
+		for (I in (as.character(unique(Final_Frame2$Insecticide)))){
+			Final_Frame3=subset(Final_Frame2,Insecticide==I)
+			for (D in (as.character(unique(Final_Frame3$Dose)))){
+				Final_Frame4=subset(Final_Frame3,Dose==D)
+				Final_Frame5=data.frame(cbind(as.character(Final_Frame4$Genotype),as.numeric(as.character(Final_Frame4$wiggle_beta))))
+				colnames(Final_Frame5)=c("Genotype","wiggle_beta")
+				Final_Frame5$Genotype=as.character(Final_Frame5$Genotype)
+				Final_Frame5$wiggle_beta=as.numeric(as.character(Final_Frame5$wiggle_beta))
+				GLM_Summary=ddply(Final_Frame5, "Genotype", summarise,
+                  N    = length(wiggle_beta),
+                  Mean = mean(wiggle_beta),
+                  Sd   = sd(wiggle_beta),
+                  Se   = Sd/sqrt(N),
+                  CI   = qnorm(0.975)*Se)
+				GLM_Summary$Mean=-GLM_Summary$Mean
+			
+				x=ggplot(data=GLM_Summary, aes(x=Genotype, y=Mean,fill=Genotype)) +
+				geom_errorbar(aes(ymin=Mean,ymax=Mean+CI), width=.5,size=.5,position=position_dodge()) +
+				geom_bar(stat="identity") +
+				geom_bar(stat="identity",color="black", show_guide=FALSE) +
+				xlab("Genotypes") +
+				ylab(expression(bold(paste("-",beta," values",sep="")))) +
+				scale_fill_manual(values=c(Color_Base_Genotype)) +
+				theme(text=element_text(face="bold",family="Times")) +
+				theme(axis.text.x=element_text(size=8,face="bold",family="Times")) +
+				theme(text=element_text(size=10,face="bold",family="Times"),plot.title=element_text(size=16,face="bold",family="Times"),legend.title=element_text(size=12,face="bold",family="Times"))+
+				background_grid(major = "xy", minor = "none",colour.major="grey75")+	
+				ylim(0,1.3) +
+				ggtitle(D)
+				save_plot(filename=paste(I,D,".pdf",sep=""),plot=x)
+			}}}
+}
+
+
+
+
+
