@@ -21,15 +21,15 @@ library(RColorBrewer)
 ### Let's get some basic info
 
 {
-dlgMessage(message="OK Lets Get Some Basic Info Before We \n Start Wiggling",type="ok")
+dlgMessage(message="Holy Wiggle Batman \n Let's find out what you want to look at",type="ok")
 mainDir=jchoose.dir(caption="Please Choose The Directory Where Your Data is Found",default="C:/Users/Shane/Dropbox/Results")
 File_Name=jchoose.files(default=mainDir,caption="Please Choose Your Data File",multi=F)
 cntrl_Line=dlgInput(message="Please Enter Which Genotype is Your Control")$res
 Graph_Title=dlgInput(message="Please Enter A Name for Your Experiment")$res
-Compare=dlgList(title="How do you Want to Display Your Data",choices=c("Doses","Genotypes","GLM"),multiple=T)$res
+Compare=dlgList(title="How do you Want to Group Your Data",choices=c("Doses_RMR","Genotypes_RMR","GLM"),multiple=T)$res
 Length=dlgList(title="What Time Interval Would You Like To Analyze",choices=c("Short","Medium","All"),multiple=T)$res
-Type=dlgList(title="Would You Like To See Corrected or Raw Values",choices=c("Relative","Raw"),multiple=T)$res
-#Group=dlgList(title="Would You Like To Display Your Results \n Isolated Against Their Mathced Controls",c("Group","Individual"),multiple=T)$res
+Type=dlgList(title="Would You Like To See Corrected or Raw Values \n Note: GLM Must Use Raw Values",choices=c("Relative","Raw"),multiple=T)$res
+Group=dlgList(title="Would You Like To Display Your Results \n Isolated Against Their Mathced Controls",c("Group","Individual"),multiple=T)$res
 }
 
 ### Create Graphing Directory and Import Data 
@@ -57,7 +57,7 @@ WI_Frame[,'Time']=as.numeric(gsub('min',"",WI_Frame[,'Time']))
 WI_Frame=data.frame(WI_Frame) 
 }
 
-###OK You've got your data frame ready. Let's get your modified WI values ###
+###Prep and Summarize Raw Data For RMR Analysis
 {
 
 Corrected_Data=data.frame()
@@ -92,12 +92,31 @@ for (a in Dates){
     }
   }
 }
+
+### Summarize all of your data for RMR value plots
+{
+Corrected_Data$Wiggle_Index=as.numeric(as.character(Corrected_Data$Wiggle_Index))
+Summary_Data=ddply(Corrected_Data, c("Dose","Genotype","Insecticide","Time"), summarise,
+                  N    = length(Wiggle_Index),
+                  Mean_Rel = mean(Modified),
+                  Sd_Rel   = sd(Modified),
+                  Se_Rel   = Sd_Rel/sqrt(N),
+                  CI_Rel   = qnorm(0.975)*Se_Rel,
+                  Mean_Raw = mean(Wiggle_Index),
+                  Sd_Raw   = sd(Wiggle_Index),
+                  Se_Raw   = Sd_Raw/sqrt(N),
+                  CI_Raw   = qnorm(0.975)*Se_Raw)
+Summary_Data$Dose=as.numeric(gsub("ppm","",Summary_Data$Dose))
+Summary_Data=data.table(Summary_Data,key="Dose")
+for (i in 1:length(Summary_Data$Dose)){
+	Summary_Data$Dose[i]=paste(Summary_Data$Dose[i],"ppm",sep="")
+}
+Summary_Data$Dose=factor(Summary_Data$Dose,as.character(Summary_Data$Dose))
+Summary_Data=data.frame(Summary_Data)
+}
 }
 
-### So now you've generated a data frame called Corrected_Data with all the information for RMR value plots
-###But lets generate a second Data Frame that you can use for the GLM analysis
-
-### Make a matrix in which each well is a row and each time point becomes an additional column
+### Prep Raw Data For Regression Analysis
 {
 Sliced_Data=as.matrix(Corrected_Data)
 Sliced_Data[,"Time"]=as.numeric(Sliced_Data[,"Time"]) 
@@ -122,13 +141,14 @@ Frame_By_Time=Frame_By_Time[-1,]
 ### Create All directories for the plot types you have chosen
 {
 setwd(GraphDir)
-ex=expand.grid(Compare,Length,Type)
+ex=expand.grid(Compare,Length,Type,Group)
 	Plot_List=c()
-for (i in 1:length(ex$Var1)){v=c()
+for (i in 1:length(ex$Var1)){
+	v=c()
 	for (b in ex[i,]){v=paste(v,b,sep="_")}
 	Plot_List=c(Plot_List,v)}	
 for (p in Plot_List){
-	if (grepl("Relative",p) & grepl("GLM",p)) {
+	if ((grepl("Relative",p) & grepl("GLM",p)) | (grepl("Individual",p) & grepl("Genotypes",p))) {
 	Plot_List=Plot_List[!Plot_List %in% p]
 	}
 	}
@@ -137,37 +157,10 @@ sapply(Plot_List,dir.create)
 }
 
 
-### Summarize all of your data for RMR value plots
-{
-
-Corrected_Data$Wiggle_Index=as.numeric(as.character(Corrected_Data$Wiggle_Index))
-Summary_Data=ddply(Corrected_Data, c("Dose","Genotype","Insecticide","Time"), summarise,
-                  N    = length(Wiggle_Index),
-                  Mean_Rel = mean(Modified),
-                  Sd_Rel   = sd(Modified),
-                  Se_Rel   = Sd_Rel/sqrt(N),
-                  CI_Rel   = qnorm(0.975)*Se_Rel,
-                  Mean_Raw = mean(Wiggle_Index),
-                  Sd_Raw   = sd(Wiggle_Index),
-                  Se_Raw   = Sd_Raw/sqrt(N),
-                  CI_Raw   = qnorm(0.975)*Se_Raw)
-				  #Date     = as.character(unique(Date)))
-Summary_Data$Dose=as.numeric(gsub("ppm","",Summary_Data$Dose))
-Summary_Data=data.table(Summary_Data,key="Dose")
-for (i in 1:length(Summary_Data$Dose)){
-	Summary_Data$Dose[i]=paste(Summary_Data$Dose[i],"ppm",sep="")
-}
-Summary_Data$Dose=factor(Summary_Data$Dose,as.character(Summary_Data$Dose))
-Summary_Data=data.frame(Summary_Data)
-}
-
-
-### Set all of your Plotting variables
-### You can alter this code to determine colour pallets depending on what information you are trying to display
-
+### Set Your Plotting Variables (Color, Shapes, Line type)
 {
 Color=colorRampPalette(c("#00007F", "blue", "#007FFF", "cyan","#7FFF7F", "#FF7F00", "red", "#7F0000"))
-#Color=c("gold3","purple")
+#Color=c("purple","orange")
 #Color=c(rev(brewer.pal(length(unique(Summary_Data$Dose))-1,"Spectral")))
 
 
@@ -193,20 +186,20 @@ Color=colorRampPalette(c("#00007F", "blue", "#007FFF", "cyan","#7FFF7F", "#FF7F0
 }
 				  
 				  
-### This will begin a for Loop that will generate plots for each element in the Plot_List vector 
-### which is the permutation of every option that you chose
-
+### Now Run the For Loop That Provides Graphs and Analysis for Each Desired Graph
 
 for (IP in Plot_List){
 	setwd(file.path(GraphDir,IP))
 
 	### This series of control flow statements will get variables needed to plot your specific graph
+	
 	{
+
 	if (grepl("Short",IP)){
 		Plot_Data=subset(Summary_Data,Time==0 | Time==5 | Time==10 | Time==15 | Time==30)
 		A="Short"
 		}else if(grepl("Medium",IP)){
-			Plot_Data=subset(Summary_Data,Time==0 | Time==5 | Time==10 | Time==15 | Time==30 | Time==45 |Time==60 | Time==120)
+			Plot_Data=subset(Summary_Data,Time==0 | Time==15 | Time==30 | Time==45 |Time==60 | Time==120)
 			A="Medium"
 		}else if(grepl("All",IP)){
 			Plot_Data=Summary_Data
@@ -248,13 +241,41 @@ for (IP in Plot_List){
 	
 	###This Part will plot your RMR values for your Dose and Genotype specific graphs
 	
-	if (E=="Dose" | E=="Genotype"){
+	if (grepl("Individual",IP)){
+	limit=max(Plot_Data$Mean)+max(Plot_Data$CI)
+		for (Y in Insecticides){
+			sub.Insecticide=subset(Plot_Data,Insecticide==Y)
+			for (a in Doses){
+				sub.Dose=subset(sub.Insecticide,Dose==a)
+					for (b in Genotypes){
+						sub.3=subset(sub.Dose,Genotype==cntrl_Line | Genotype==b)
+						sub.3$Time=as.numeric(as.character(sub.3$Time))
+						write.csv(sub.3,file=paste("Dose_Genotype_Plot Data",a,b,".csv"))
+						
+						x=ggplot(sub.3,aes_string(x="Time",y="Mean",colour="Genotype")) +
+						geom_errorbar(aes(ymin=Mean-CI, ymax=Mean+CI), width=max(as.numeric(unique(sub.3$Time)))/30,size=.5) +
+						geom_line(size=.9,aes(linetype=Genotype)) +
+						geom_point(size=3,fill=1,aes(shape=Genotype)) +
+						scale_colour_manual(values=get(paste("Color_","Genotype",sep=""))) +
+						scale_shape_manual(values=get(paste("Shape_","Genotype",sep=""))) +
+						scale_linetype_manual(values=get(paste("Line_","Genotype",sep=""))) +
+						ylim(0,limit) +
+						xlab("Time (min)") +
+						ylab(paste("RMR Value")) +
+						theme(text=element_text(size=10,face="bold",family="Times"),plot.title=element_text(size=16,face="bold",family="Times"),legend.title=element_text(size=12,face="bold",family="Times"))+
+						background_grid(major = "xy", minor = "none",colour.major="grey75")+
+						ggtitle(paste(b,Y,a))
+						save_plot(filename=paste(Graph_Title,b,Y,a,".pdf"),plot=x,base_aspect_ratio = 1.3)
+	}}}}
+	
+	else if (E=="Dose" | E=="Genotype"){
+		limit=max(Plot_Data$Mean)+max(Plot_Data$CI)
 		for (Y in Insecticides){
 			sub.Insecticide=subset(Plot_Data,Insecticide==Y)
 				for (X in get(paste(F,"s",sep=""))){
 					sub.3=subset(sub.Insecticide,get(F)==X)
-					### Considers if Individual or Group plot will be used 
 					sub.3$Time=as.numeric(as.character(sub.3$Time))
+					write.csv(sub.3,file=paste("Dose_Genotype_Plot Data",Y,X,".csv"))
 					x=ggplot(sub.3,aes_string(x="Time",y="Mean",colour=E)) +
 					geom_errorbar(aes(ymin=Mean-CI, ymax=Mean+CI), width=max(as.numeric(unique(sub.3$Time)))/30,size=.5) +
 					geom_line(size=.9,aes_string(linetype=E)) +
@@ -262,7 +283,7 @@ for (IP in Plot_List){
 					scale_colour_manual(values=get(paste("Color_",E,sep=""))) +
 					scale_shape_manual(values=get(paste("Shape_",E,sep=""))) +
 					scale_linetype_manual(values=get(paste("Line_",E,sep=""))) +
-					ylim(0,1.6) +
+					ylim(0,limit) +
 					xlab("Time (min)") +
 					ylab(paste("RMR Value")) +
 					theme(text=element_text(size=10,face="bold",family="Times"),plot.title=element_text(size=16,face="bold",family="Times"),legend.title=element_text(size=12,face="bold",family="Times"))+
@@ -303,9 +324,8 @@ for (IP in Plot_List){
 		Out=Out[-1,]
 		table(Out[,1])
 		Trans=names(table(Out[,1]))[table(Out[,1])==max(table(Out[,1]))]
-
 		#Overwrite Your Trans  Trans="raw",Trans="xlog" or Trans="xylog"
-		Trans="xlog"
+		#Trans="raw"
 
 		wiggle_beta=as.numeric(Out[,Trans])
 		Final_Frame=cbind(Data_Por_Tiempo[,"Genotype"],Data_Por_Tiempo[,"Dose"],Data_Por_Tiempo[,"Insecticide"],wiggle_beta=(wiggle_beta))
@@ -316,12 +336,14 @@ for (IP in Plot_List){
 		
 		for (I in (as.character(unique(Final_Frame2$Insecticide)))){
 			Final_Frame3=subset(Final_Frame2,Insecticide==I)
+			lim=max(-as.numeric(as.character(Final_Frame3$wiggle_beta)))+(max(as.numeric(as.character(Final_Frame3$wiggle_beta))))/7
 			for (D in (as.character(unique(Final_Frame3$Dose)))){
 				Final_Frame4=subset(Final_Frame3,Dose==D)
 				Final_Frame5=data.frame(cbind(as.character(Final_Frame4$Genotype),as.numeric(as.character(Final_Frame4$wiggle_beta))))
 				colnames(Final_Frame5)=c("Genotype","wiggle_beta")
 				Final_Frame5$Genotype=as.character(Final_Frame5$Genotype)
 				Final_Frame5$wiggle_beta=as.numeric(as.character(Final_Frame5$wiggle_beta))
+				write.csv(Final_Frame5,file=paste("Final_Frame",A,D,I,".csv"))
 				GLM_Summary=ddply(Final_Frame5, "Genotype", summarise,
                   N    = length(wiggle_beta),
                   Mean = mean(wiggle_beta),
@@ -329,7 +351,7 @@ for (IP in Plot_List){
                   Se   = Sd/sqrt(N),
                   CI   = qnorm(0.975)*Se)
 				GLM_Summary$Mean=-GLM_Summary$Mean
-			
+				write.csv(GLM_Summary,file=paste("GLM_Summary",D,I,".csv"))
 				x=ggplot(data=GLM_Summary, aes(x=Genotype, y=Mean,fill=Genotype)) +
 				geom_errorbar(aes(ymin=Mean,ymax=Mean+CI), width=.5,size=.5,position=position_dodge()) +
 				geom_bar(stat="identity") +
@@ -341,7 +363,7 @@ for (IP in Plot_List){
 				theme(axis.text.x=element_text(size=8,face="bold",family="Times")) +
 				theme(text=element_text(size=10,face="bold",family="Times"),plot.title=element_text(size=16,face="bold",family="Times"),legend.title=element_text(size=12,face="bold",family="Times"))+
 				background_grid(major = "xy", minor = "none",colour.major="grey75")+	
-				ylim(0,1.3) +
+				ylim(0,lim) +
 				ggtitle(D)
 				save_plot(filename=paste(I,D,".pdf",sep=""),plot=x)
 			}}}
