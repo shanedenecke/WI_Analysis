@@ -1,4 +1,8 @@
-### Lets test tracking
+### Welcome to the Wiggle Script
+### Remember to have your wiggle videos named in the following way
+### (Genotype).(Dose).(Time).(plate).(Pesticide).(Date).MTS
+### Example: (w1118).(48ppm).(15min).(rep1).(Imidacloprid).(23.10.14).MTS
+### Any questions (lord knows this isn't explained well) contact the author at shanedenecke@gmail.com. Promise I won't be a jerk
 
 ### 1) Import all of your libraries that you will need in this script
 {
